@@ -92,7 +92,7 @@ async function go(filePath: string) {
 
   const animationsLoading = animations
     .map(function (anim) {
-      return `      ${anim.name}: loaded.animationGroups.find(ac => ac.name === "${anim.name}")`;
+      return `      ${anim.name}: loaded.animationGroups.find(ac => ac.name === "${anim.name}")!`;
     })
     .join(",\n");
 
