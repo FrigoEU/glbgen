@@ -28,7 +28,7 @@ async function go(filePath: string) {
   try {
     const res = await fsp.stat(filePath);
   } catch (err) {
-    console.log(`Couldn't find file ${filePath}, err: ${err}, exiting.`);
+    console.error(`Couldn't find file ${filePath}, err: ${err}, exiting.`);
     return;
   }
 
@@ -36,14 +36,14 @@ async function go(filePath: string) {
   try {
     fl = await readFirstLine(filePath);
   } catch (err) {
-    console.log(`Couldn't find file ${filePath}, err: ${err}, exiting.`);
+    console.error(`Couldn't find file ${filePath}, err: ${err}, exiting.`);
     return;
   }
   const firstLine = fl;
 
   const matches = firstLine.match(/.*JSON(.*)\ /); // Not sure if this 100% fullproof :D
   if (!matches || matches.length < 2) {
-    console.log("Couldn't parse ${filePath} as .glb file, exiting.");
+    console.error("Couldn't parse ${filePath} as .glb file, exiting.");
     return;
   }
 
@@ -51,30 +51,31 @@ async function go(filePath: string) {
   try {
     jso = JSON.parse(matches[1]);
   } catch (err) {
-    console.log(
+    console.error(
       `Failed to parse ${filePath} JSON entries, err: ${err}, exiting.`
     );
     return;
   }
   const json = jso;
 
-  console.log("Parsed:");
-  console.log(json);
+  console.log("Parse successful.");
 
   const animations: { channels: unknown; name: string; samplers: unknown }[] =
     json.animations;
 
   const animationsTypes = animations
     .map(function (anim) {
-      return anim.name + ": AnimationGroup;";
+      return `    ${anim.name}: AnimationGroup;`;
     })
     .join("\n");
 
   const animationsLoading = animations
     .map(function (anim) {
-      return anim.name + ': findAnimation(loaded, "' + anim.name + '")';
+      return `      ${anim.name}: loaded.animationGroups.find(ac => ac.name === "${anim.name}")`;
     })
     .join(",\n");
+
+  const parsed = path.parse(filePath);
 
   const template = `
 import { Scene } from "@babylonjs/core/scene";
@@ -87,14 +88,14 @@ type Model = {
   mesh: Mesh;
   assetContainer: AssetContainer;
   animations: {
-    ${animationsTypes}
+${animationsTypes}
   }
 }
 
 export async function load(scene: Scene): Promise<Model> {
   const loaded = await SceneLoader.LoadAssetContainerAsync(
     "",
-    ${filePath},
+    "./${parsed.name}${parsed.ext}",
     scene,
     null,
     ".glb"
@@ -108,16 +109,19 @@ export async function load(scene: Scene): Promise<Model> {
     mesh: loaded.meshes[0] as Mesh,
     assetContainer: loaded,
     animations: {
-      ${animationsLoading}
-      walk: findAnimation(loaded, "walk"),
-      run: findAnimation(loaded, "run"),
-      punch: findAnimation(loaded, "punch"),
-      recieveHit: findAnimation(loaded, "recieveHit"),
-      attackRanged: findAnimation(loaded, "bow_attack_draw"),
+${animationsLoading}
     },
   };
 }
 `;
+
+  const tsFilename = path.join(parsed.dir, parsed.name + ".ts");
+  try {
+    await fsp.writeFile(tsFilename, template);
+  } catch (err) {
+    console.error(`Failed to write .ts file: ${err}`);
+  }
+  console.log(`Wrote file ${tsFilename}`);
 }
 
 if (
@@ -129,5 +133,5 @@ if (
   console.log(`Generating typescript file for ${filePath}.`);
   go(filePath);
 } else {
-  console.log(`No valid .glb file provided as argument, exiting.`);
+  console.error(`No valid .glb file provided as argument, exiting.`);
 }
