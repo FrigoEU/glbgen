@@ -1,6 +1,8 @@
 import * as path from "path";
 import * as fsp from "fs/promises";
 import * as fs from "fs";
+import { O_RDONLY } from "constants";
+import { TextDecoder } from "util";
 
 const args: string[] = process.argv.slice(2);
 
@@ -26,30 +28,49 @@ function readFirstLine(path: string): Promise<string> {
 
 async function go(filePath: string) {
   try {
-    const res = await fsp.stat(filePath);
+    await fsp.stat(filePath);
   } catch (err) {
     console.error(`Couldn't find file ${filePath}, err: ${err}, exiting.`);
     return;
   }
 
-  let fl: string = "";
-  try {
-    fl = await readFirstLine(filePath);
-  } catch (err) {
-    console.error(`Couldn't find file ${filePath}, err: ${err}, exiting.`);
-    return;
-  }
-  const firstLine = fl;
+  // https://github.com/KhronosGroup/glTF/tree/master/specification/2.0#binary-gltf-layout
+  const fd = fs.openSync(filePath, O_RDONLY);
+  const jsonLengthBuffer = new DataView(new ArrayBuffer(4));
+  // First 4 bytes = glTF
+  // fs.readSync(fd, jsonLengthBuffer, 0, 4, 0);
+  // const gltfVersion =
+  //   console.log(
+  //     "first 4 bytes as utf8: " +
+  //     new TextDecoder("utf-8").decode(jsonLengthBuffer)
+  //   );
 
-  const matches = firstLine.match(/.*JSON(.*)\ /); // Not sure if this 100% fullproof :D
-  if (!matches || matches.length < 2) {
-    console.error("Couldn't parse ${filePath} as .glb file, exiting.");
-    return;
+  // next 4 bytes = uint32 <2> = gltf version
+  fs.readSync(fd, jsonLengthBuffer, 0, 4, 4);
+  const gltfVersion = jsonLengthBuffer.getUint32(
+    0,
+    true /* little-endian! see gltf spec */
+  );
+  if (gltfVersion != 2) {
+    console.log(".glb file is not glTF version 2");
   }
+
+  // next 4 bytes = total length
+  // next 4 bytes = json length
+  fs.readSync(fd, jsonLengthBuffer, 0, 4, 12);
+
+  const jsonLength = jsonLengthBuffer.getUint32(
+    0,
+    true /* little-endian, see glTF spec */
+  );
+
+  const jsonBuff = new DataView(new ArrayBuffer(jsonLength));
+  fs.readSync(fd, jsonBuff, 0, jsonLength, 20);
+  const jsonStr = new TextDecoder("utf-8").decode(jsonBuff);
 
   let jso: any;
   try {
-    jso = JSON.parse(matches[1]);
+    jso = JSON.parse(jsonStr);
   } catch (err) {
     console.error(
       `Failed to parse ${filePath} JSON entries, err: ${err}, exiting.`
@@ -83,6 +104,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { AssetContainer } from "@babylonjs/core/assetContainer";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { AnimationGroup } from "@babylonjs/core/Animations/animationGroup";
+import glb from "./${parsed.name}${parsed.ext}";
 
 type Model = {
   mesh: Mesh;
@@ -95,7 +117,7 @@ ${animationsTypes}
 export async function load(scene: Scene): Promise<Model> {
   const loaded = await SceneLoader.LoadAssetContainerAsync(
     "",
-    "./${parsed.name}${parsed.ext}",
+    glb,
     scene,
     null,
     ".glb"
@@ -133,5 +155,7 @@ if (
   console.log(`Generating typescript file for ${filePath}.`);
   go(filePath);
 } else {
-  console.error(`No valid .glb file provided as argument, exiting.`);
+  console.error(
+    `No valid .glb file provided as argument. Args: ${args}. Exiting. `
+  );
 }
